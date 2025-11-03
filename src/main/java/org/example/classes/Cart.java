@@ -2,6 +2,9 @@ package org.example.classes;
 
 import java.util.List;
 
+import org.example.generator.Generatable;
+
+@Generatable
 public class Cart {
     private List<Product> items;
 
