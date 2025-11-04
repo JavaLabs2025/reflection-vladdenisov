@@ -1,17 +1,12 @@
 package org.example.generator;
 
-import java.io.File;
-import java.io.IOException;
 import java.lang.reflect.Array;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Parameter;
-import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
-import java.net.URISyntaxException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -25,15 +20,11 @@ import java.util.Objects;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 
 public class Generator {
 
     private static final int DEFAULT_MAX_DEPTH = 3;
     private static final int DEFAULT_MAX_COLLECTION_SIZE = 3;
-    private static final String SCAN_PACKAGE = "org.example.classes";
-
-    private static final ConcurrentHashMap<Class<?>, List<Class<?>>> IMPLEMENTATIONS_CACHE = new ConcurrentHashMap<>();
 
     private final Random random;
     private final int maxDepth;
@@ -75,10 +66,10 @@ public class Generator {
 
     private Object tryGenerateSimpleValue(Class<?> clazz) {
         if (clazz.isPrimitive()) {
-            return generatePrimitiveValue(clazz);
+            return RandomValues.generatePrimitiveValue(clazz, random);
         }
 
-        Object basicValue = generateWrapperOrCommon(clazz);
+        Object basicValue = RandomValues.generateWrapperOrCommon(clazz, random);
         if (basicValue != null) {
             return basicValue;
         }
@@ -96,7 +87,7 @@ public class Generator {
 
     private Class<?> resolveConcreteClass(Class<?> clazz) {
         if (clazz.isInterface() || Modifier.isAbstract(clazz.getModifiers())) {
-            List<Class<?>> candidates = findImplementations(clazz);
+            List<Class<?>> candidates = ImplementationFinder.findImplementations(clazz);
             if (candidates.isEmpty()) {
                 throw new IllegalArgumentException("No generatable implementations found for type: " + clazz.getName());
             }
@@ -143,20 +134,20 @@ public class Generator {
         Class<?> rawType = parameter.getType();
 
         if (rawType.isPrimitive()) {
-            return generatePrimitiveValue(rawType);
+            return RandomValues.generatePrimitiveValue(rawType, random);
         }
 
-        Object basicValue = generateWrapperOrCommon(rawType);
+        Object basicValue = RandomValues.generateWrapperOrCommon(rawType, random);
         if (basicValue != null) {
             return basicValue;
         }
 
         // For constructor parameters: Collections/Maps/Arrays should be empty
         if (Collection.class.isAssignableFrom(rawType)) {
-            return createEmptyCollection(rawType);
+            return TypeHelpers.createEmptyCollection(rawType);
         }
         if (Map.class.isAssignableFrom(rawType)) {
-            return createEmptyMap(rawType);
+            return TypeHelpers.createEmptyMap(rawType);
         }
         if (rawType.isArray()) {
             return Array.newInstance(rawType.getComponentType(), 0);
@@ -192,7 +183,7 @@ public class Generator {
             }
         }
 
-        Class<?> elementClass = resolveCollectionElementType(genericType);
+        Class<?> elementClass = TypeHelpers.resolveCollectionElementType(genericType);
         for (int i = 0; i < size; i++) {
             collection.add(generateCollectionElement(elementClass, depth + 1));
         }
@@ -215,11 +206,11 @@ public class Generator {
             }
         }
 
-        Class<?>[] kv = resolveMapKeyValueTypes(genericType);
+        Class<?>[] kv = TypeHelpers.resolveMapKeyValueTypes(genericType);
         Class<?> keyClass = kv[0];
         Class<?> valueClass = kv[1];
         for (int i = 0; i < size; i++) {
-            Object key = isImmutableKeyType(keyClass) ? generateElementForType(keyClass, depth + 1) : null;
+            Object key = TypeHelpers.isImmutableKeyType(keyClass) ? generateElementForType(keyClass, depth + 1) : null;
             if (key == null) continue;
             Object value = generateElementForType(valueClass, depth + 1);
             map.put(key, value);
@@ -232,9 +223,9 @@ public class Generator {
             return null;
         }
         if (elementClass.isPrimitive()) {
-            return generatePrimitiveValue(elementClass);
+            return RandomValues.generatePrimitiveValue(elementClass, random);
         }
-        Object basicValue = generateWrapperOrCommon(elementClass);
+        Object basicValue = RandomValues.generateWrapperOrCommon(elementClass, random);
         if (basicValue != null) {
             return basicValue;
         }
@@ -242,138 +233,6 @@ public class Generator {
             return null;
         }
         return generateValueOfType(elementClass, depth);
-    }
-
-    private Class<?> resolveCollectionElementType(Type genericType) {
-        if (genericType instanceof ParameterizedType parameterizedType) {
-            Type[] arguments = parameterizedType.getActualTypeArguments();
-            if (arguments.length == 1) {
-                Type argument = arguments[0];
-                if (argument instanceof Class<?> aClass) {
-                    return aClass;
-                }
-                if (argument instanceof ParameterizedType parameterizedArgument) {
-                    Type raw = parameterizedArgument.getRawType();
-                    if (raw instanceof Class<?> aClass) {
-                        return aClass;
-                    }
-                }
-            }
-        }
-        return Object.class;
-    }
-
-    private Class<?>[] resolveMapKeyValueTypes(Type genericType) {
-        Class<?> key = Object.class;
-        Class<?> value = Object.class;
-        if (genericType instanceof ParameterizedType parameterizedType) {
-            Type[] args = parameterizedType.getActualTypeArguments();
-            if (args.length == 2) {
-                if (args[0] instanceof Class<?> k) key = k;
-                if (args[1] instanceof Class<?> v) value = v;
-            }
-        }
-        return new Class<?>[]{key, value};
-    }
-
-    private Object generateWrapperOrCommon(Class<?> cl) {
-        if (cl == String.class) {
-            return randomString();
-        }
-        if (cl == Integer.class) {
-            return random.nextInt(201) - 100;
-        }
-        if (cl == Long.class) {
-            return (long) (random.nextInt(2001) - 1000);
-        }
-        if (cl == Double.class) {
-            return (random.nextDouble() * 200.0) - 100.0;
-        }
-        if (cl == Float.class) {
-            return (random.nextFloat() * 200.0f) - 100.0f;
-        }
-        if (cl == Short.class) {
-            return (short) (random.nextInt(2001) - 1000);
-        }
-        if (cl == Byte.class) {
-            return (byte) (random.nextInt(201) - 100);
-        }
-        if (cl == Boolean.class) {
-            return random.nextBoolean();
-        }
-        if (cl == Character.class) {
-            return (char) (random.nextInt(26) + 'a');
-        }
-        return null;
-    }
-
-    private Object generatePrimitiveValue(Class<?> cl) {
-        if (cl == int.class) {
-            return random.nextInt(201) - 100;
-        }
-        if (cl == long.class) {
-            return (long) (random.nextInt(2001) - 1000);
-        }
-        if (cl == double.class) {
-            return (random.nextDouble() * 200.0) - 100.0;
-        }
-        if (cl == float.class) {
-            return (random.nextFloat() * 200.0f) - 100.0f;
-        }
-        if (cl == short.class) {
-            return (short) (random.nextInt(2001) - 1000);
-        }
-        if (cl == byte.class) {
-            return (byte) (random.nextInt(201) - 100);
-        }
-        if (cl == boolean.class) {
-            return random.nextBoolean();
-        }
-        if (cl == char.class) {
-            return (char) (random.nextInt(26) + 'a');
-        }
-        throw new IllegalArgumentException("Unsupported primitive type: " + cl.getName());
-    }
-
-    private String randomString() {
-        int length = random.nextInt(10) + 1;
-        StringBuilder builder = new StringBuilder(length);
-        for (int i = 0; i < length; i++) {
-            builder.append((char) ('a' + random.nextInt(26)));
-        }
-        return builder.toString();
-    }
-
-    private List<Class<?>> findImplementations(Class<?> targetType) {
-        return IMPLEMENTATIONS_CACHE.computeIfAbsent(targetType, t -> {
-            List<Class<?>> found = new ArrayList<>();
-            String path = SCAN_PACKAGE.replace('.', '/');
-            try {
-                var resources = Thread.currentThread().getContextClassLoader().getResources(path);
-                while (resources.hasMoreElements()) {
-                    URL url = resources.nextElement();
-                    if ("file".equals(url.getProtocol())) {
-                        File dir = new File(url.toURI());
-                        File[] files = dir.listFiles((d, name) -> name.endsWith(".class") && !name.contains("$"));
-                        if (files == null) continue;
-                        for (File f : files) {
-                            String className = SCAN_PACKAGE + "." + f.getName().substring(0, f.getName().length() - 6);
-                            try {
-                                Class<?> candidate = Class.forName(className);
-                                if (!Modifier.isAbstract(candidate.getModifiers())
-                                        && candidate.getAnnotation(Generatable.class) != null
-                                        && t.isAssignableFrom(candidate)) {
-                                    found.add(candidate);
-                                }
-                            } catch (ClassNotFoundException ignored) {
-                            }
-                        }
-                    }
-                }
-            } catch (IOException | URISyntaxException ignored) {
-            }
-            return found;
-        });
     }
 
     private void populateFields(Object instance, int depth) throws InvocationTargetException, InstantiationException, IllegalAccessException {
@@ -424,32 +283,11 @@ public class Generator {
         }
     }
 
-    private static final Set<Class<?>> IMMUTABLE_KEY_TYPES = Set.of(String.class, Integer.class, Long.class, Double.class, Float.class, Short.class, Byte.class, Character.class);
-
-    private boolean isImmutableKeyType(Class<?> cl) {
-        if (cl == null) return false;
-        if (cl.isEnum()) return true;
-        return IMMUTABLE_KEY_TYPES.contains(cl) || cl.isPrimitive();
-    }
-
     private Object generateElementForType(Class<?> elementClass, int depth) throws InvocationTargetException, InstantiationException, IllegalAccessException {
         if (elementClass == Object.class) return null;
         Object simple = tryGenerateSimpleValue(elementClass);
         if (simple != null) return simple;
         if (depth >= maxDepth) return null;
         return generateValueOfType(elementClass, depth);
-    }
-
-    private Collection<?> createEmptyCollection(Class<?> rawType) {
-        if (List.class.isAssignableFrom(rawType)) return new ArrayList<>();
-        if (Set.class.isAssignableFrom(rawType)) return new HashSet<>();
-        if (Queue.class.isAssignableFrom(rawType)) return new LinkedList<>();
-        if (Collection.class.isAssignableFrom(rawType)) return new ArrayList<>();
-        throw new IllegalArgumentException("Unsupported collection type: " + rawType.getName());
-    }
-
-    private Map<?, ?> createEmptyMap(Class<?> rawType) {
-        if (Map.class.isAssignableFrom(rawType)) return new HashMap<>();
-        throw new IllegalArgumentException("Unsupported map type: " + rawType.getName());
     }
 }
