@@ -23,6 +23,7 @@ import java.util.Set;
 
 public class Generator {
 
+    // Значения по умолчанию для максимальной глубины и размера коллекций
     private static final int DEFAULT_MAX_DEPTH = 3;
     private static final int DEFAULT_MAX_COLLECTION_SIZE = 3;
 
@@ -54,6 +55,7 @@ public class Generator {
             return simpleValue;
         }
 
+        // Ограничение глубины рекурсии сложных типов
         if (depth >= maxDepth) {
             return null;
         }
@@ -142,7 +144,9 @@ public class Generator {
             return basicValue;
         }
 
-        // For constructor parameters: Collections/Maps/Arrays should be empty
+        // В конструкторе заполняем параметры пустыми коллекциями,
+        // так как могут быть, например, бизнес-валидации в конструкторе.
+        // Наполняем объект уже после инициализации.
         if (Collection.class.isAssignableFrom(rawType)) {
             return TypeHelpers.createEmptyCollection(rawType);
         }
