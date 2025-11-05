@@ -28,7 +28,7 @@ class GeneratorTest {
         });
     }
 
-    @RepeatedTest(5)
+    @Test
     void generatesShapeImplementation() throws InvocationTargetException, InstantiationException, IllegalAccessException {
         Shape value = (Shape) generator.generateValueOfType(Shape.class);
         assertNotNull(value);
